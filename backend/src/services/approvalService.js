@@ -229,6 +229,7 @@ export async function loadPayloadFromDb(conn, app) {
     }
     return {
       ...form,
+      linkedApplicationId: app.linked_application_id || null, // 提交时回填关联申请（防丢失）
       expenseItems: items.map((it) => ({
         ...it, noReceipt: !!it.noReceipt,
         attachmentIds: byItem.get(it.id) || [],
@@ -236,9 +237,6 @@ export async function loadPayloadFromDb(conn, app) {
     };
   }
   if (app.type === 'CUSTOM') return { formData: form };
-  if (app.type === 'REIMBURSEMENT') {
-    return { ...form, linkedApplicationId: app.linked_application_id || null };
-  }
   return form; // TRAVEL：全部字段在 form_data
 }
 

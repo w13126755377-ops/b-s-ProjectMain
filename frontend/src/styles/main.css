@@ -1,0 +1,74 @@
+/* 全局样式与响应式辅助 */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-light);
+}
+
+/* 通用卡片容器 */
+.card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.card-title {
+  font-size: 16px; font-weight: 600; margin: 0 0 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.card-title::before {
+  content: ''; width: 4px; height: 16px; border-radius: 2px;
+  background: var(--el-color-primary); display: inline-block;
+}
+
+/* 工具类 */
+.flex { display: flex; align-items: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.flex-wrap { flex-wrap: wrap; }
+.gap8 { gap: 8px; }
+.gap16 { gap: 16px; }
+.mt8 { margin-top: 8px; }
+.mt16 { margin-top: 16px; }
+.mb16 { margin-bottom: 16px; }
+.text-muted { color: var(--el-text-color-secondary); font-size: 13px; }
+.text-danger { color: var(--el-color-danger); }
+.text-right { text-align: right; }
+.w-full { width: 100%; }
+.table-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+
+/* 金额强调 */
+.amount-strong { font-weight: 700; color: var(--el-color-primary); }
+
+/* 警告高亮（无票支出 / 重复票据） */
+.warn-block {
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-7);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+/* 审批时间线节点 */
+.timeline-node-name { font-weight: 600; }
+.timeline-comment { margin-top: 4px; font-size: 13px; color: var(--el-text-color-regular); }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .card { padding: 12px; border-radius: 6px; }
+  /* 表格横向滚动 */
+  .el-table { font-size: 13px; }
+  /* 弹窗留白 */
+  .el-dialog { --el-dialog-margin-top: 5vh !important; width: 94% !important; }
+  .el-message-box { width: 92% !important; }
+  .page { padding: 0; }
+  .table-toolbar .el-input, .table-toolbar .el-select { max-width: 100%; }
+}
+
+/* 表单在移动端全宽 */
+@media (max-width: 768px) {
+  .el-form-item__content { max-width: 100%; }
+}
