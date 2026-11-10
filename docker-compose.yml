@@ -24,7 +24,8 @@ services:
       retries: 10
       start_period: 30s
     ports:
-      - "3306:3306"
+      # 宿主机 3306 通常已被本机 MySQL 占用，这里映射到 13306（容器内仍为 3306，供后端内网访问）
+      - "13306:3306"
 
   backend:
     build: ./backend

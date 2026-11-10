@@ -49,7 +49,7 @@ delegationsRouter.post('/', validate({ body: createSchema }), asyncHandler(async
     [req.user.id, endTime.replace('T', ' '), startTime.replace('T', ' ')]
   );
   if (overlap) throw conflict('与现有生效中的委托时间重叠，请先停用原委托');
-  const [r] = await query(
+  const r = await query(
     `INSERT INTO delegations (user_id, delegatee_id, start_time, end_time, enabled, reason, created_at)
      VALUES (?, ?, ?, ?, 1, ?, NOW())`,
     [req.user.id, delegateeId, startTime.replace('T', ' '), endTime.replace('T', ' '), reason]

@@ -20,24 +20,24 @@ const MONTH_BUCKETS = `
 
 /** 个人统计 */
 export async function personalStats(userId) {
-  const [statusRows] = await query(
+  const statusRows = await query(
     `SELECT status, COUNT(*) AS c FROM applications WHERE applicant_id = ? GROUP BY status`,
     [userId]
   );
   const byStatus = { DRAFT: 0, IN_APPROVAL: 0, APPROVED: 0, REJECTED: 0, WITHDRAWN: 0 };
   for (const r of statusRows) byStatus[r.status] = r.c;
 
-  const [todo] = await query(
+  const todo = await query(
     `SELECT COUNT(*) AS c FROM process_instances WHERE status = 'IN_APPROVAL' AND current_approver_id = ?`,
     [userId]
   );
-  const [done] = await query(
+  const done = await query(
     `SELECT COUNT(DISTINCT application_id) AS c FROM approval_records
      WHERE acted_by = ? AND action IN ('APPROVE','REJECT')`,
     [userId]
   );
   // 近 6 个月提交趋势（草稿不计入——口径按提交时间）
-  const [trend] = await query(
+  const trend = await query(
     `SELECT b.ym, COALESCE(t.c, 0) AS c
      FROM ${MONTH_BUCKETS} b
      LEFT JOIN (
@@ -82,7 +82,7 @@ export async function deptStats(user) {
     deptFilter = dept_id; // 部门负责人：本部门
   } else {
     // FINANCE / COMPANY_HEAD：必须查授权记录（明确授权）
-    const [grants] = await query(
+    const grants = await query(
       'SELECT scope FROM stats_grants WHERE user_id = ?', [id]
     );
     const scopes = grants.map((g) => g.scope);
@@ -104,26 +104,27 @@ export async function deptStats(user) {
   const w = where.join(' AND ');
 
   // 各类型数量与状态分布（按提交时间口径：仅统计已提交）
-  const [byType] = await query(
+  const byType = await query(
     `SELECT a.type, a.status, COUNT(*) AS c
      FROM applications a
      WHERE ${w} AND a.submitted_at IS NOT NULL
      GROUP BY a.type, a.status`,
     params
   );
-  // 已通过金额（草稿/驳回/撤回不计入），按部门
-  const [amountByDept] = await query(
+  // 已通过金额（草稿/驳回/撤回不计入），按部门。
+  // typeFilter 挂在 JOIN 条件上（只影响哪些申请计入），deptFilter 挂在 WHERE 上（限定返回哪些部门）。
+  const amountByDept = await query(
     `SELECT d.id AS dept_id, d.name AS dept_name, COALESCE(SUM(a.total_amount_cents), 0) AS approved_cents, COUNT(a.id) AS approved_count
      FROM departments d
      LEFT JOIN applications a ON a.dept_id = d.id AND a.status = 'APPROVED' AND a.submitted_at IS NOT NULL
        ${typeFilter ? 'AND a.type IN (?, ?)' : ''}
-       ${deptFilter ? 'AND d.id = ?' : ''}
+     ${deptFilter ? 'WHERE d.id = ?' : ''}
      GROUP BY d.id, d.name
      ORDER BY approved_cents DESC`,
     [...(typeFilter || []), ...(deptFilter ? [deptFilter] : [])]
   );
   // 近 6 个月已通过金额趋势（口径：提交时间）
-  const [trend] = await query(
+  const trend = await query(
     `SELECT b.ym, COALESCE(t.approved_cents, 0) AS approved_cents, COALESCE(t.c, 0) AS c
      FROM ${MONTH_BUCKETS} b
      LEFT JOIN (
@@ -137,6 +138,6 @@ export async function deptStats(user) {
     params
   );
   // 部门列表（供筛选展示）
-  const [depts] = await query('SELECT id, name FROM departments ORDER BY id');
+  const depts = await query('SELECT id, name FROM departments ORDER BY id');
   return { byType, amountByDept, trend, departments: depts, scope: { deptFilter, typeFilter } };
 }

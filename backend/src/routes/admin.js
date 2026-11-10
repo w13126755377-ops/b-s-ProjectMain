@@ -44,7 +44,7 @@ adminRouter.get('/users', validate({ query: usersQuerySchema }), asyncHandler(as
   if (keyword) { where.push('(u.username LIKE ? OR u.name LIKE ? OR u.email LIKE ?)'); params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`); }
   if (deptId) { where.push('u.dept_id = ?'); params.push(deptId); }
   if (roleId) { where.push('u.id IN (SELECT user_id FROM user_roles WHERE role_id = ?)'); params.push(roleId); }
-  const [countRows] = await query(`SELECT COUNT(*) AS c FROM users u WHERE ${where.join(' AND ')}`, params);
+  const countRows = await query(`SELECT COUNT(*) AS c FROM users u WHERE ${where.join(' AND ')}`, params);
   const rows = await query(
     `SELECT u.id, u.username, u.email, u.name, u.dept_id, u.dept_confirmed, u.status, u.created_at,
             d.name AS dept_name,
@@ -89,7 +89,7 @@ adminRouter.patch('/users/:id', validate({ params: z.object({ id: z.coerce.numbe
     await writeAudit(null, req.user.id, 'CHANGE_DEPT', 'USER', user.id, { from: user.dept_id, to: deptId });
   }
   if (deptConfirmed === true) {
-    sets.push('dept_confirmed = 1'); params.push(1);
+    sets.push('dept_confirmed = 1');
     await writeAudit(null, req.user.id, 'CONFIRM_DEPT', 'USER', user.id, { dept_id: deptId || user.dept_id });
   }
   if (!sets.length) throw badRequest('没有需要修改的内容');
@@ -106,9 +106,9 @@ adminRouter.put('/users/:id/roles', validate({ params: z.object({ id: z.coerce.n
   const user = await queryOne('SELECT * FROM users WHERE id = ?', [req.params.id]);
   if (!user) throw notFound('用户不存在');
   const roleIds = [...new Set(req.body.roleIds)];
-  const [valid] = await query(`SELECT id FROM roles WHERE id IN (${roleIds.map(() => '?').join(',') || '0'})`, roleIds);
+  const valid = await query(`SELECT id FROM roles WHERE id IN (${roleIds.map(() => '?').join(',') || '0'})`, roleIds);
   if (valid.length !== roleIds.length) throw badRequest('存在无效角色');
-  const [before] = await query('SELECT role_id FROM user_roles WHERE user_id = ?', [req.params.id]);
+  const before = await query('SELECT role_id FROM user_roles WHERE user_id = ?', [req.params.id]);
   const beforeIds = before.map((r) => r.role_id);
   await query('DELETE FROM user_roles WHERE user_id = ?', [req.params.id]);
   for (const rid of roleIds) {
@@ -128,7 +128,7 @@ const deptSchema = z.object({ name: z.string().trim().min(1, '部门名称不能
 
 adminRouter.post('/departments', validate({ body: deptSchema }), asyncHandler(async (req, res) => {
   try {
-    const [r] = await query('INSERT INTO departments (name, description, created_at) VALUES (?, ?, NOW())',
+    const r = await query('INSERT INTO departments (name, description, created_at) VALUES (?, ?, NOW())',
       [req.body.name, req.body.description]);
     await writeAudit(null, req.user.id, 'CREATE_DEPT', 'DEPARTMENT', r.insertId, { name: req.body.name });
     ok(res, { id: r.insertId }, '部门已创建');
@@ -148,7 +148,7 @@ adminRouter.patch('/departments/:id', validate({ params: z.object({ id: z.coerce
 }));
 
 adminRouter.delete('/departments/:id', validate({ params: z.object({ id: z.coerce.number().int().positive() }) }), asyncHandler(async (req, res) => {
-  const [users] = await query('SELECT COUNT(*) AS c FROM users WHERE dept_id = ?', [req.params.id]);
+  const users = await query('SELECT COUNT(*) AS c FROM users WHERE dept_id = ?', [req.params.id]);
   if (users[0].c > 0) throw conflict('该部门下还有用户，不能删除（请先调整用户部门）');
   await query('DELETE FROM departments WHERE id = ?', [req.params.id]);
   await writeAudit(null, req.user.id, 'DELETE_DEPT', 'DEPARTMENT', req.params.id, {});
@@ -188,7 +188,7 @@ adminRouter.get('/templates', asyncHandler(async (_req, res) => {
 
 adminRouter.post('/templates', validate({ body: templateSchema }), asyncHandler(async (req, res) => {
   const t = normalizeTemplate(req.body);
-  const [r] = await query(
+  const r = await query(
     `INSERT INTO process_templates (code, name, description, category, applicable_depts, form_schema, flow_config, version, status, created_by, created_at, updated_at)
      VALUES (?, ?, ?, 'CUSTOM', ?, ?, ?, 1, 'DRAFT', ?, NOW(), NOW())`,
     [`custom_${crypto.randomUUID().slice(0, 8)}`, t.name, t.description, t.applicable_depts, t.form_schema, t.flow_config, req.user.id]
@@ -206,8 +206,8 @@ adminRouter.put('/templates/:id', validate({ params: z.object({ id: z.coerce.num
   let targetId = tpl.id;
   if (tpl.status !== 'DRAFT') {
     // 新版本草稿
-    const [max] = await query('SELECT MAX(version) AS v FROM process_templates WHERE code = ?', [tpl.code]);
-    const [r] = await query(
+    const max = await query('SELECT MAX(version) AS v FROM process_templates WHERE code = ?', [tpl.code]);
+    const r = await query(
       `INSERT INTO process_templates (code, name, description, category, applicable_depts, form_schema, flow_config, version, status, created_by, created_at, updated_at)
        VALUES (?, ?, ?, 'CUSTOM', ?, ?, ?, ?, 'DRAFT', ?, NOW(), NOW())`,
       [tpl.code, t.name, t.description, t.applicable_depts, t.form_schema, t.flow_config, (max[0].v || 0) + 1, req.user.id]
@@ -238,7 +238,7 @@ adminRouter.post('/templates/:id/publish', validate({ params: z.object({ id: z.c
   // 适用部门合法性
   const deptIds = parseJson(tpl.applicable_depts, []);
   if (deptIds.length) {
-    const [depts] = await query(`SELECT id FROM departments WHERE id IN (${deptIds.map(() => '?').join(',')})`, deptIds);
+    const depts = await query(`SELECT id FROM departments WHERE id IN (${deptIds.map(() => '?').join(',')})`, deptIds);
     if (depts.length !== deptIds.length) errors.push('适用部门包含不存在的部门');
   }
   if (errors.length) throw badRequest(`发布校验未通过：\n${errors.join('；\n')}`);
@@ -284,7 +284,7 @@ adminRouter.patch('/config', validate({ body: z.object({
   receipt_max_total_mb: z.number().int().min(1).max(1000).optional(),
   receipt_max_size_mb: z.number().int().min(1).max(50).optional(),
   remind_timeout_hours: z.number().min(0).max(8760).optional(),
-}) }), asyncHandler(async (req, res) => {
+}).strict() }), asyncHandler(async (req, res) => {
   for (const [key, value] of Object.entries(req.body)) {
     if (!ALLOWED_CONFIG_KEYS.has(key)) continue;
     const before = await queryOne('SELECT value FROM system_configs WHERE `key` = ?', [key]);
@@ -317,7 +317,7 @@ adminRouter.post('/stats-grants', validate({ body: z.object({
     'SELECT id FROM stats_grants WHERE user_id = ? AND scope = ?', [req.body.userId, req.body.scope]
   );
   if (exists) throw conflict('该授权已存在');
-  const [r] = await query(
+  const r = await query(
     'INSERT INTO stats_grants (user_id, scope, granted_by, created_at) VALUES (?, ?, ?, NOW())',
     [req.body.userId, req.body.scope, req.user.id]
   );
@@ -345,7 +345,7 @@ adminRouter.get('/audit-logs', validate({ query: auditQuerySchema }), asyncHandl
   const { keyword, page = 1, pageSize = 20 } = req.query;
   const where = keyword ? '(al.action LIKE ? OR al.target_type LIKE ?)' : '1=1';
   const params = keyword ? [`%${keyword}%`, `%${keyword}%`] : [];
-  const [countRows] = await query(`SELECT COUNT(*) AS c FROM audit_logs al WHERE ${where}`, params);
+  const countRows = await query(`SELECT COUNT(*) AS c FROM audit_logs al WHERE ${where}`, params);
   const rows = await query(
     `SELECT al.id, al.action, al.target_type, al.target_id, al.detail, al.created_at,
             u.name AS operator_name, u.username AS operator_username

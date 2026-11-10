@@ -96,6 +96,7 @@ const PROC = (title, items, quotes, extra = {}) => ({
   type: 'PROCUREMENT', title,
   reason: 'E2E 采购', expectedArrivalDate: '2026-12-20', project: 'E2E 项目',
   budgetCapCents: 100000000, remark: '端到端测试',
+  selectReason: '端到端测试：选择理由', // 选择理由必填（§7.1），成功用例默认补齐
   items,
   quotations: quotes.map((q) => ({ quoteDate: '2026-11-05', quoteDetail: '报价明细', ...q })),
   ...extra,
@@ -139,7 +140,8 @@ check('S3.3 管理员确认部门归属', r.status === 200);
 s = await submit(tokens[uname], c.data.id);
 check('S3.4 确认后可提交', s.status === 200, s.err);
 r = await api(tokens[uname], 'POST', `/api/applications/${c.data.id}/withdraw`);
-check('S3.5 撤回成功 → WITHDRAWN', r.status === 200 && r.data.data.status === 'WITHDRAWN');
+const wd = await detail(tokens[uname], c.data.id);
+check('S3.5 撤回成功 → WITHDRAWN', r.status === 200 && wd.data.status === 'WITHDRAWN');
 
 console.log('--- S4 差旅流程 ---');
 await login('sunqi', 'Sunqi@123');
@@ -224,7 +226,7 @@ let rmb2Id = c.data.id;
 up = await upload(tokens.sunqi, rmb2Id, 'RECEIPT', '发票A.png', pngBytes(), 'image/png');
 const pngA2 = up.data.data.id;
 await api(tokens.sunqi, 'PATCH', `/api/applications/${rmb2Id}`, { body: { type: 'REIMBURSEMENT', title: 'E2E 第二次报销', description: 'x', linkedApplicationId: null, remark: '', expenseItems: [
-  { ...exp('TRAFFIC', 100, [pngA2]) }, { ...exp('HOTEL', 200, []), noReceipt: true, noReceiptReason: '无' }, { ...exp('MEAL', 50, []) },
+  { ...exp('TRAFFIC', 100, [pngA2]) }, { ...exp('HOTEL', 200, []), noReceipt: true, noReceiptReason: '无' }, { ...exp('MEAL', 50, []), noReceipt: true, noReceiptReason: '无票' },
 ] } });
 s = await submit(tokens.sunqi, rmb2Id);
 check('S5.12 跨单重复票据预警（提交返回 warnings）', s.status === 200 && Array.isArray(s.data?.warnings) && s.data.warnings.length >= 1, JSON.stringify(s.data?.warnings));
@@ -245,7 +247,7 @@ check('S6.1 采购明细<2 被拒', c.status === 400, c.err);
 c = await createApp(tokens.zhouba, PROC('E2E 采购-非最低价', procItems(350000, 400000), [
   { supplierName: '甲', quoteAmountCents: 900000 },
   { supplierName: '乙', quoteAmountCents: 1100000, selected: true },
-]));
+], { selectReason: '' }));
 check('S6.2 未选最低价且无说明被拒', c.status === 400, c.err);
 // 修正：补 selectReason
 let proc1 = await createApp(tokens.zhouba, PROC('E2E 采购-非最低价', procItems(350000, 400000), [
@@ -258,7 +260,7 @@ check('S6.4 提交成功', s.status === 200, s.err);
 d = await detail(tokens.zhouba, proc1.data.id);
 check('S6.5 单号格式 CG+日期-序号', /^CG\d{8}-\d{4}$/.test(d.data.app_no), d.data.app_no);
 check('S6.6 总额=拟选报价 1100000 分', d.data.total_amount_cents === 1100000, `got=${d.data.total_amount_cents}`);
-check('S6.7 链=部门负责人→财务（lisi→wangwu）', d.data.instance.nodes.length === 2 && d.data.instance.nodes[0].resolved_name === 'lisi' && d.data.instance.nodes[1].resolved_name === 'wangwu');
+check('S6.7 链=部门负责人→财务（lisi→wangwu）', d.data.instance.nodes.length === 2 && d.data.instance.nodes[0].resolved_username === 'lisi' && d.data.instance.nodes[1].resolved_username === 'wangwu');
 await login('lisi', 'Lisi@123');
 await approve(tokens.lisi, d.data.instance.id, '同意');
 await login('wangwu', 'Wangwu@123');
@@ -267,7 +269,7 @@ check('S6.8 财务批准 → APPROVED', ap.status === 200);
 // 单一来源
 c = await createApp(tokens.zhouba, PROC('E2E 单源无说明', procItems(100, 200), [{ supplierName: '独家供应商', quoteAmountCents: 50000, selected: true }]));
 check('S6.9 单一来源无说明被拒', c.status === 400, c.err);
-c = await createApp(tokens.zhouba, PROC('E2E 单一来源采购', procItems(100, 200), [{ supplierName: '独家供应商', quoteAmountCents: 50000, selected: true }], { singleSourceReason: '该器件为独家专利产品' }));
+c = await createApp(tokens.zhouba, PROC('E2E 单一来源采购', procItems(100, 200), [{ supplierName: '独家供应商', quoteAmountCents: 50000, selected: true }], { singleSourceReason: '该器件为独家专利产品', selectReason: '独家供应商，无其他可选' }));
 s = await submit(tokens.zhouba, c.data.id);
 check('S6.10 单一来源+说明提交成功', s.status === 200, s.err);
 d = await detail(tokens.zhouba, c.data.id);
@@ -282,7 +284,9 @@ check('S7.2 驳回成功 → REJECTED', ap0.status === 200);
 d = await detail(tokens.zhouba, c.data.id);
 check('S7.3 驳回记录含理由', d.data.status === 'REJECTED' && d.data.records.some((x) => x.action === 'REJECT' && x.comment.includes('供应商资质不足')));
 r = await api(tokens.zhouba, 'POST', `/api/applications/${c.data.id}/copy`);
-check('S7.4 复制重提生成新草稿', r.status === 200 && r.data.data.id && r.data.data.id !== c.data.id && r.data.data.status === 'DRAFT');
+const copyId = r.data.data?.id;
+const cd = await detail(tokens.zhouba, copyId);
+check('S7.4 复制重提生成新草稿', r.status === 200 && copyId && copyId !== c.data.id && cd.data.status === 'DRAFT');
 
 console.log('--- S8 阈值加签：企业负责人节点 ---');
 await login('zhouba', 'Zhouba@123');
@@ -293,7 +297,7 @@ c = await createApp(tokens.zhouba, PROC('E2E 大额采购', procItems(3000000, 2
 s = await submit(tokens.zhouba, c.data.id);
 check('S8.1 大额采购提交成功', s.status === 200, s.err);
 d = await detail(tokens.zhouba, c.data.id);
-check('S8.2 链含企业负责人节点（3 节点）', d.data.instance.nodes.length === 3 && d.data.instance.nodes[2].rule.type === 'COMPANY_HEAD' && d.data.instance.nodes[2].resolved_name === 'zhaoliu');
+check('S8.2 链含企业负责人节点（3 节点）', d.data.instance.nodes.length === 3 && d.data.instance.nodes[2].rule.type === 'COMPANY_HEAD' && d.data.instance.nodes[2].resolved_username === 'zhaoliu');
 check('S8.3 阈值快照 10000000 分', d.data.instance.threshold_cents === 10000000);
 await login('lisi', 'Lisi@123');
 await approve(tokens.lisi, d.data.instance.id);
@@ -357,7 +361,7 @@ check('S11.2 管理员授予 sunqi 部门负责人', r.status === 200);
 s = await submit(tokens.zhangsan, c.data.id);
 check('S11.3 多负责人按用户名排序解析 → sunqi', s.status === 200, s.err);
 d = await detail(tokens.zhangsan, c.data.id);
-check('S11.4 首节点审批人=sunqi（sunqi<zhangsan 排序）', d.data.instance.nodes[0].resolved_name === 'sunqi');
+check('S11.4 首节点审批人=sunqi（sunqi<zhangsan 排序）', d.data.instance.nodes[0].resolved_username === 'sunqi');
 await login('sunqi', 'Sunqi@123');
 await approve(tokens.sunqi, d.data.instance.id, '部门同意');
 await login('wangwu', 'Wangwu@123');
@@ -376,12 +380,12 @@ check('S11.7 委托给同部门负责人成功', r.status === 200, errMsg(r));
 s = await submit(tokens.sunqi, c.data.id);
 check('S11.8 委托后提交成功', s.status === 200, s.err);
 d = await detail(tokens.sunqi, c.data.id);
-check('S11.9 首节点 delegated_from=sunqi 受托人 zhangsan', d.data.instance.nodes[0].resolved_name === 'zhangsan' && d.data.instance.nodes[0].delegated_from === users.sunqi.id);
+check('S11.9 首节点 delegated_from=sunqi 受托人 zhangsan', d.data.instance.nodes[0].resolved_username === 'zhangsan' && d.data.instance.nodes[0].delegated_from === users.sunqi.id);
 await login('zhangsan', 'Zhangsan@123');
 ap = await approve(tokens.zhangsan, d.data.instance.id, '受托代办同意');
 check('S11.10 受托人代办审批成功', ap.status === 200);
 d = await detail(tokens.sunqi, c.data.id);
-check('S11.11 审批记录留痕（acted_by=zhangsan）', d.data.records.some((x) => x.action === 'APPROVE' && x.acted_by_name === 'zhangsan'));
+check('S11.11 审批记录留痕（acted_by=zhangsan）', d.data.records.some((x) => x.action === 'APPROVE' && x.acted_by_username === 'zhangsan'));
 await login('wangwu', 'Wangwu@123');
 await approve(tokens.wangwu, d.data.instance.id);
 // 非法委托
@@ -416,11 +420,11 @@ await api(tokens.zhouba, 'POST', `/api/applications/${c.data.id}/withdraw`);
 console.log('--- S12 自定义模板：发布校验/全流程/管理员权限边界 ---');
 await login('admin', 'Admin@123');
 const tplBody = (patch = {}) => ({
-  name: 'E2E 用章申请', description: '端到端自定义流程', applicableDepts: [3],
+  name: 'E2E 用章申请', description: '端到端自定义流程', applicableDepts: [2],
   formSchema: { fields: [
     { id: 'f_amount', type: 'amount', label: '金额', required: true, rules: { min: 0 } },
-    { id: 'f_radio', type: 'radio', label: '类型', required: true, options: [{ label: '合同章', value: 'a' }, { label: '公章', value: 'b' }] },
-    { id: 'f_cond', type: 'text', label: '合同编号', required: true, condition: { field: 'f_radio', op: 'eq', value: 'a' } },
+    { id: 'f_radio', type: 'radio', label: '类型', required: true, options: ['合同章', '公章'] },
+    { id: 'f_cond', type: 'text', label: '合同编号', required: true, condition: { field: 'f_radio', op: 'eq', value: '合同章' } },
   ] },
   flowConfig: { nodes: [
     { name: '部门负责人审批', rule: { type: 'DEPT_HEAD' } },
@@ -458,14 +462,20 @@ await login('zhouba', 'Zhouba@123');
 r = await api(tokens.zhouba, 'GET', '/api/templates/published');
 check('S12.5 员工可见已发布自定义模板（适用部门过滤）', r.data.data.custom.some((x) => x.id === tplId));
 // 条件字段：f_radio='b' 时 f_cond 隐藏 → 可缺省
-c = await createApp(tokens.zhouba, { type: 'CUSTOM', templateId: tplId, title: 'E2E 用章', formData: { f_amount: 10000, f_radio: 'b' } });
+c = await createApp(tokens.zhouba, { type: 'CUSTOM', templateId: tplId, title: 'E2E 用章', formData: { f_amount: 10000, f_radio: '公章' } });
 s = await submit(tokens.zhouba, c.data.id);
 check('S12.6 隐藏字段跳过必填，提交成功', s.status === 200, s.err);
 d = await detail(tokens.zhouba, c.data.id);
-check('S12.7 链=部门负责人(lisi)→指定用户(admin)', d.data.instance.nodes.length === 2 && d.data.instance.nodes[1].resolved_name === 'admin');
-// 管理员权限边界
-r = await detail(tokens.admin, c.data.id);
+check('S12.7 链=部门负责人(lisi)→指定用户(admin)', d.data.instance.nodes.length === 2 && d.data.instance.nodes[1].resolved_username === 'admin');
+// 管理员权限边界：管理权限 ≠ 审批权限。用「管理员不在审批链内」的采购申请验证详情不可见。
+const cb = await createApp(tokens.zhouba, PROC('E2E 管理员越权', procItems(100, 200), [
+  { supplierName: '甲', quoteAmountCents: 50000, selected: true },
+  { supplierName: '乙', quoteAmountCents: 60000 },
+]));
+await submit(tokens.zhouba, cb.data.id);
+r = await detail(tokens.admin, cb.data.id);
 check('S12.8 管理员非审批链成员时详情 403', r.status === 403);
+await api(tokens.zhouba, 'POST', `/api/applications/${cb.data.id}/withdraw`);
 await login('lisi', 'Lisi@123');
 await approve(tokens.lisi, d.data.instance.id, '部门同意');
 await login('admin', 'Admin@123');
@@ -477,10 +487,10 @@ check('S12.10 成为审批人后可访问详情', d.status === 200);
 ap = await approve(tokens.admin, d.data.instance.id, '核签通过');
 check('S12.11 管理员核签 → APPROVED', ap.status === 200);
 // 必填字段缺失
-c = await createApp(tokens.zhouba, { type: 'CUSTOM', templateId: tplId, title: 'E2E 用章-缺金额', formData: { f_radio: 'b' } });
+c = await createApp(tokens.zhouba, { type: 'CUSTOM', templateId: tplId, title: 'E2E 用章-缺金额', formData: { f_radio: '公章' } });
 check('S12.12 必填字段缺失被拒', c.status === 400, c.err);
 // 条件可见时必填
-c = await createApp(tokens.zhouba, { type: 'CUSTOM', templateId: tplId, title: 'E2E 用章-合同', formData: { f_amount: 10000, f_radio: 'a' } });
+c = await createApp(tokens.zhouba, { type: 'CUSTOM', templateId: tplId, title: 'E2E 用章-合同', formData: { f_amount: 10000, f_radio: '合同章' } });
 check('S12.13 条件可见的必填字段缺失被拒', c.status === 400, c.err);
 
 console.log('--- S13 附件：格式/大小/越权/草稿限定 ---');
@@ -560,7 +570,7 @@ ap = await approve(tokens.wangwu, d.data.instance.id, '非当前审批人');
 check('S14.3 非当前审批人操作被拒(403)', ap.status === 403, errMsg(ap));
 await login('lisi', 'Lisi@123');
 ap = await approve(tokens.lisi, d.data.instance.id, '同意');
-ap2 = await approve(tokens.lisi, d.data.instance.id, '重复点击');
+let ap2 = await approve(tokens.lisi, d.data.instance.id, '重复点击');
 check('S14.4 已处理实例重复审批被拒(4xx)', ap.status === 200 && ap2.status >= 400, `2nd=${ap2.status}`);
 // 通知：未读/标记已读/全部已读
 await login('zhouba', 'Zhouba@123');
@@ -568,12 +578,12 @@ r = await api(tokens.zhouba, 'GET', '/api/notifications?page=1&pageSize=50');
 const notif = r.data.data;
 check('S14.5 通知列表含未读数', notif.unread >= 1, `unread=${notif.unread}`);
 const first = notif.list[0];
-r = await api(tokens.zhouba, 'POST', `/api/notifications/${first.id}/read`);
+r = await api(tokens.zhouba, 'PATCH', `/api/notifications/${first.id}/read`);
 check('S14.6 单条标记已读成功', r.status === 200);
 r = await api(tokens.zhouba, 'GET', '/api/notifications/unread-count');
 const unreadAfter = r.data.data.unread;
 check('S14.7 未读数递减', unreadAfter === notif.unread - 1, `${unreadAfter} vs ${notif.unread - 1}`);
-r = await api(tokens.zhouba, 'POST', '/api/notifications/read-all');
+r = await api(tokens.zhouba, 'PATCH', '/api/notifications/read-all');
 check('S14.8 全部已读', r.status === 200);
 r = await api(tokens.zhouba, 'GET', '/api/notifications/unread-count');
 check('S14.9 未读归零', r.data.data.unread === 0);
@@ -605,10 +615,10 @@ const deptSum = (stats, id) => {
   return row ? Number(row.approved_cents) : 0;
 };
 check('S15.7 研发部已通过金额=2143000 分', deptSum(zhangsanStats, 1) === 2143000, `got=${deptSum(zhangsanStats, 1)}`);
-check('S15.8 部门负责人统计仅本部门（市场部不可见）', deptSum(zhangsanStats, 3) === 0 && zhangsanStats.amountByDept.every((x) => x.dept_id === 1));
+check('S15.8 部门负责人统计仅本部门（市场部不可见）', deptSum(zhangsanStats, 2) === 0 && zhangsanStats.amountByDept.every((x) => x.dept_id === 1));
 await login('zhaoliu', 'Zhaoliu@123');
 r = await api(tokens.zhaoliu, 'GET', '/api/stats/dept');
-check('S15.9 企业口径下市场部=13600000 分（草稿/驳回/撤回排除）', deptSum(r.data.data, 3) === 13600000, `got=${deptSum(r.data.data, 3)}`);
+check('S15.9 企业口径下市场部=13600000 分（草稿/驳回/撤回排除）', deptSum(r.data.data, 2) === 13600000, `got=${deptSum(r.data.data, 2)}`);
 check('S15.10 企业口径下研发部=2143000 分', deptSum(r.data.data, 1) === 2143000, `got=${deptSum(r.data.data, 1)}`);
 check('S15.11 趋势数组 6 个月', r.data.data.trend.length === 6 && r.data.data.trend.every((x) => /^\d{4}-\d{2}$/.test(x.ym)));
 
@@ -705,10 +715,12 @@ if (SLOW) {
   s = await submit(tokens.zhouba, c.data.id);
   check('S18.1 提交成功', s.status === 200, s.err);
   await login('lisi', 'Lisi@123');
-  await api(tokens.lisi, 'POST', '/api/notifications/read-all');
-  await sleep(100 * 1000);
+  await api(tokens.lisi, 'PATCH', '/api/notifications/read-all');
+  // 后台催办扫描间隔 60s、阈值 0.02h≈72s，最坏情况约在提交后 120~180s 才触发，
+  // 等 200s 保证必有一次扫描命中。
+  await sleep(200 * 1000);
   r = await api(tokens.lisi, 'GET', '/api/notifications/unread-count');
-  check('S18.2 超时催办产生通知（约 1.2 分钟）', r.data.data.unread >= 1, `unread=${r.data.data.unread}`);
+  check('S18.2 超时催办产生通知（阈值 0.02h）', r.data.data.unread >= 1, `unread=${r.data.data.unread}`);
   await login('admin', 'Admin@123');
   await api(tokens.admin, 'PATCH', '/api/admin/config', { body: { remind_timeout_hours: 48 } });
   await login('zhouba', 'Zhouba@123');

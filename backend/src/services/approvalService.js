@@ -86,12 +86,6 @@ async function resolveNodeApprover(conn, node, applicantId, applicantDeptId) {
     throw badRequest(`节点"${node.name}"的审批人规则无效`);
   }
 
-  if (resolved === applicantId) {
-    throw badRequest(
-      `节点"${node.name}"的审批人解析为申请人本人。任何人不能审批自己的申请，请先设置审批委托或联系管理员调整流程`
-    );
-  }
-
   // 审批委托：解析到受托人并记录 delegated_from（留痕）。
   // 安全约束：角色类节点的受托人必须持有该角色（DEPT_HEAD 还须同部门），
   // 防止财务/高金额审批权被委托给未授权员工（《设计文档》§14.2）。
@@ -120,6 +114,12 @@ async function resolveNodeApprover(conn, node, applicantId, applicantDeptId) {
       }
     }
     return { resolved_user_id: delegatee, delegated_from: resolved };
+  }
+  // 无有效委托时：审批人即解析到的用户本人；若为申请人本人则拒绝自审。
+  if (resolved === applicantId) {
+    throw badRequest(
+      `节点"${node.name}"的审批人解析为申请人本人。任何人不能审批自己的申请，请先设置审批委托或联系管理员调整流程`
+    );
   }
   return { resolved_user_id: resolved, delegated_from: null };
 }
@@ -209,6 +209,7 @@ export async function loadPayloadFromDb(conn, app) {
        FROM quotations WHERE application_id = ? ORDER BY id`, [app.id]);
     return {
       ...form,
+      title: app.title,
       items,
       quotations: quotes.map((q) => ({
         ...q, online: !!q.online, selected: !!q.selected,
@@ -231,9 +232,13 @@ export async function loadPayloadFromDb(conn, app) {
     }
     return {
       ...form,
+      title: app.title,
       linkedApplicationId: app.linked_application_id || null, // 提交时回填关联申请（防丢失）
       expenseItems: items.map((it) => ({
-        ...it, noReceipt: !!it.noReceipt,
+        ...it,
+        noReceipt: !!it.noReceipt,
+        receiptNo: it.receiptNo || '',
+        noReceiptReason: it.noReceiptReason || '',
         attachmentIds: byItem.get(it.id) || [],
       })),
     };
@@ -530,6 +535,14 @@ export async function submitApplication(conn, user, applicationId) {
   const body = await loadPayloadFromDb(conn, app);
   const data = await validateAndNormalize(conn, app.type, body, applicationId, app.template_id, user.id);
   if (app.type === 'REIMBURSEMENT') {
+    // 提交时完整性校验：每条非无票支出必须至少关联 1 份票据（草稿阶段允许暂缺，见《设计文档》§7）
+    const receiptCountByItem = new Map();
+    for (const rc of data.receipts) receiptCountByItem.set(rc.itemIdx, (receiptCountByItem.get(rc.itemIdx) || 0) + 1);
+    data.expenseItems.forEach((it, i) => {
+      if (!it.noReceipt && !receiptCountByItem.get(i)) {
+        throw badRequest(`费用明细第 ${i + 1} 条（${it.expenseType}）需至少关联 1 份票据，或标记为无票支出`);
+      }
+    });
     await ensureReceiptAttachments(conn, applicationId, data.receipts);
   }
 

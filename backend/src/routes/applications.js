@@ -100,7 +100,7 @@ applicationsRouter.post('/:id/copy', validate({ params: idParamSchema }), asyncH
 applicationsRouter.delete('/:id', validate({ params: idParamSchema }), asyncHandler(async (req, res) => {
   const storedNames = await transaction((conn) => deleteDraft(conn, req.user, req.params.id));
   for (const name of storedNames) {
-    const [refs] = await query('SELECT COUNT(*) AS c FROM attachments WHERE stored_name = ?', [name]);
+    const refs = await query('SELECT COUNT(*) AS c FROM attachments WHERE stored_name = ?', [name]);
     if (refs[0].c === 0) {
       await fs.unlink(path.join(config.upload.dir, name)).catch(() => {});
     }

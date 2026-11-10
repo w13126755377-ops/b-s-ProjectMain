@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS procurement_items (
   amount_cents     BIGINT       NOT NULL COMMENT '小计（分，服务端重算）',
   PRIMARY KEY (id),
   KEY idx_app (application_id),
-  CONSTRAINT fk_pi_app FOREIGN KEY (application_id) REFERENCES applications (id) ON DELETE CASCADE
+  CONSTRAINT fk_pci_app FOREIGN KEY (application_id) REFERENCES applications (id) ON DELETE CASCADE
 ) ENGINE=InnoDB COMMENT='采购明细';
 
 -- ---------- 报价单（≥2 家或单一来源说明） ----------

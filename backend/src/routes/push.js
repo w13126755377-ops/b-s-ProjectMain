@@ -42,7 +42,7 @@ pushRouter.post('/subscribe', validate({ body: subSchema }), asyncHandler(async 
 export const configRouter = Router();
 configRouter.use(requireAuth);
 configRouter.get('/public', asyncHandler(async (_req, res) => {
-  const [rows] = await query('SELECT `key`, value FROM system_configs');
+  const rows = await query('SELECT `key`, value FROM system_configs');
   const map = {};
   for (const r of rows) map[r.key] = r.value;
   ok(res, {

@@ -12,7 +12,7 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { query, queryOne } from '../db.js';
-import { badRequest, conflict, forbidden, notFound, ok, asyncHandler } from '../errors.js';
+import { AppError, badRequest, conflict, forbidden, notFound, ok, asyncHandler } from '../errors.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { config } from '../config.js';
@@ -45,7 +45,7 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (isAllowedFile(file.mimetype, ext)) return cb(null, true);
-    cb(new Error('仅支持 JPEG / PNG / PDF 格式的票据与附件'));
+    cb(new AppError(400, '仅支持 JPEG / PNG / PDF 格式的票据与附件'));
   },
 });
 
@@ -74,7 +74,7 @@ attachmentsRouter.post('/', upload.single('file'), asyncHandler(async (req, res)
     throw badRequest(`附件类型 ${bizType} 不适用于该申请类型（${app.type}）`);
   }
   // 数量与总大小限制（配置项可调）
-  const [countRows] = await query('SELECT COUNT(*) AS c, COALESCE(SUM(size_bytes),0) AS total FROM attachments WHERE application_id = ?', [applicationId]);
+  const countRows = await query('SELECT COUNT(*) AS c, COALESCE(SUM(size_bytes),0) AS total FROM attachments WHERE application_id = ?', [applicationId]);
   const maxCount = Number(await getConfig('receipt_max_count') || 20);
   const maxTotalMb = Number(await getConfig('receipt_max_total_mb') || 100);
   if (countRows[0].c >= maxCount) {
@@ -87,7 +87,7 @@ attachmentsRouter.post('/', upload.single('file'), asyncHandler(async (req, res)
   }
 
   const md5 = md5Buffer(await fs.readFile(req.file.path));
-  const [r] = await query(
+  const r = await query(
     `INSERT INTO attachments (application_id, biz_type, original_name, stored_name, mime, size_bytes, md5, uploaded_by)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [applicationId, bizType, req.file.originalname, req.file.filename,
@@ -112,7 +112,7 @@ attachmentsRouter.delete('/:id', validate({ params: z.object({ id: z.coerce.numb
   if (!app || app.applicant_id !== req.user.id) throw forbidden('只能删除本人申请的附件');
   if (app.status !== 'DRAFT') throw conflict('只有草稿阶段可以删除附件');
   await query('DELETE FROM attachments WHERE id = ?', [req.params.id]);
-  const [refs] = await query('SELECT COUNT(*) AS c FROM attachments WHERE stored_name = ?', [att.stored_name]);
+  const refs = await query('SELECT COUNT(*) AS c FROM attachments WHERE stored_name = ?', [att.stored_name]);
   if (refs[0].c === 0) {
     await fs.unlink(path.join(config.upload.dir, att.stored_name)).catch(() => {});
   }

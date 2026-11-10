@@ -13,12 +13,12 @@ templatesRouter.use(requireAuth);
  * 模板的"适用部门"限制在此过滤（服务端强制，前端隐藏仅为体验）。
  */
 templatesRouter.get('/published', asyncHandler(async (req, res) => {
-  const [builtin] = await query(
+  const builtin = await query(
     `SELECT id, code, name, description, category, version
      FROM process_templates WHERE category = 'BUILTIN' AND status = 'PUBLISHED'
      ORDER BY id`
   );
-  const [custom] = await query(
+  const custom = await query(
     `SELECT id, code, name, description, category, version, form_schema, flow_config, applicable_depts
      FROM process_templates
      WHERE category = 'CUSTOM' AND status = 'PUBLISHED'

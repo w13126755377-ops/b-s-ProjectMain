@@ -30,7 +30,7 @@ notificationsRouter.get('/', validate({ query: listSchema }), asyncHandler(async
   if (req.query.unread === '1') where.push('is_read = 0');
   const page = Math.max(1, Number(req.query.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize || 10)));
-  const [countRows] = await query(
+  const countRows = await query(
     `SELECT COUNT(*) AS c FROM notifications WHERE ${where.join(' AND ')}`, params);
   const rows = await query(
     `SELECT id, type, title, content, link, is_read, created_at

@@ -18,10 +18,10 @@ export async function listMyApplications(user, f) {
   if (f.keyword) { where.push('(a.title LIKE ? OR a.app_no LIKE ?)'); params.push(`%${f.keyword}%`, `%${f.keyword}%`); }
   const page = Math.max(1, Number(f.page || 1));
   const pageSize = Math.min(50, Math.max(1, Number(f.pageSize || 10)));
-  const [countRows] = await query(
+  const countRows = await query(
     `SELECT COUNT(*) AS c FROM applications a WHERE ${where.join(' AND ')}`, params);
   const total = countRows[0].c;
-  const [rows] = await query(
+  const rows = await query(
     `SELECT a.id, a.app_no, a.type, a.title, a.status, a.total_amount_cents,
             a.submitted_at, a.created_at, a.finished_at, a.source_application_id,
             pi.current_approver_id, u.name AS current_approver_name
@@ -51,7 +51,7 @@ export function assertCanViewApplication(user, app, instance) {
 /** 我的待办 / 已办 */
 export async function listTasks(user, scope) {
   if (scope === 'todo') {
-    const [rows] = await query(
+    const rows = await query(
       `SELECT pi.id AS instance_id, pi.application_id, pi.current_node_idx, pi.status AS inst_status,
               pi.flow_snapshot, pi.submitted_at,
               a.app_no, a.type, a.title, a.status AS app_status, a.total_amount_cents,
@@ -77,7 +77,7 @@ export async function listTasks(user, scope) {
     });
   }
   // 已办：我作为操作人处理过的审批记录（批准/驳回）
-  const [rows] = await query(
+  const rows = await query(
     `SELECT DISTINCT a.id AS application_id, a.app_no, a.type, a.title, a.status,
             a.total_amount_cents, a.finished_at, a.submitted_at,
             applicant.name AS applicant_name,
@@ -112,7 +112,7 @@ export async function buildApplicationDetail(user, app, instance) {
   };
 
   // 申请人信息
-  const [users] = await query(
+  const users = await query(
     `SELECT u.id, u.name, u.username, d.name AS dept_name
      FROM users u LEFT JOIN departments d ON d.id = u.dept_id WHERE u.id = ?`,
     [app.applicant_id]
@@ -128,19 +128,22 @@ export async function buildApplicationDetail(user, app, instance) {
     }
   }
   const nameMap = new Map();
+  const usernameMap = new Map();
   if (userIds.size) {
-    const [urows] = await query(
-      `SELECT id, name FROM users WHERE id IN (${[...userIds].map(() => '?').join(',')})`,
+    const urows = await query(
+      `SELECT id, name, username FROM users WHERE id IN (${[...userIds].map(() => '?').join(',')})`,
       [...userIds]
     );
-    urows.forEach((u) => nameMap.set(u.id, u.name));
+    urows.forEach((u) => { nameMap.set(u.id, u.name); usernameMap.set(u.id, u.username); });
   }
 
   if (instance) {
     const nodes = ((instance.flow_snapshot || {}).nodes || []).map((n) => ({
       ...n,
       resolved_name: nameMap.get(n.resolved_user_id) || null,
+      resolved_username: usernameMap.get(n.resolved_user_id) || null,
       delegated_from_name: n.delegated_from ? (nameMap.get(n.delegated_from) || null) : null,
+      delegated_from_username: n.delegated_from ? (usernameMap.get(n.delegated_from) || null) : null,
     }));
     detail.instance = {
       id: instance.id,
@@ -152,9 +155,9 @@ export async function buildApplicationDetail(user, app, instance) {
       threshold_cents: (instance.flow_snapshot || {}).thresholdCents ?? null,
       nodes,
     };
-    const [records] = await query(
+    const records = await query(
       `SELECT ar.node_idx, ar.node_name, ar.action, ar.comment, ar.result, ar.created_at,
-              ar.approver_user_id, ar.acted_by, u.name AS acted_by_name
+              ar.approver_user_id, ar.acted_by, u.name AS acted_by_name, u.username AS acted_by_username
        FROM approval_records ar
        LEFT JOIN users u ON u.id = ar.acted_by
        WHERE ar.application_id = ?
@@ -166,13 +169,13 @@ export async function buildApplicationDetail(user, app, instance) {
 
   // 类型明细
   if (app.type === 'PROCUREMENT') {
-    const [items] = await query('SELECT * FROM procurement_items WHERE application_id = ? ORDER BY id', [app.id]);
+    const items = await query('SELECT * FROM procurement_items WHERE application_id = ? ORDER BY id', [app.id]);
     detail.items = items;
-    const [quotes] = await query('SELECT * FROM quotations WHERE application_id = ? ORDER BY id', [app.id]);
+    const quotes = await query('SELECT * FROM quotations WHERE application_id = ? ORDER BY id', [app.id]);
     detail.quotations = quotes.map((q) => ({ ...q, attachmentIds: parseJson(q.attachment_ids, []) }));
   } else if (app.type === 'REIMBURSEMENT') {
-    const [items] = await query('SELECT * FROM expense_items WHERE application_id = ? ORDER BY id', [app.id]);
-    const [recs] = await query('SELECT * FROM receipts WHERE application_id = ?', [app.id]);
+    const items = await query('SELECT * FROM expense_items WHERE application_id = ? ORDER BY id', [app.id]);
+    const recs = await query('SELECT * FROM receipts WHERE application_id = ?', [app.id]);
     const recMap = new Map();
     for (const r of recs) {
       if (!recMap.has(r.expense_item_id)) recMap.set(r.expense_item_id, []);
@@ -183,7 +186,7 @@ export async function buildApplicationDetail(user, app, instance) {
     }));
     // 关联申请摘要（获批差旅/采购信息展示，独立列 linked_application_id）
     if (app.linked_application_id) {
-      const [la] = await query(
+      const la = await query(
         `SELECT a.id, a.app_no, a.title, a.type, a.form_data, a.total_amount_cents
          FROM applications a WHERE a.id = ?`,
         [app.linked_application_id]
@@ -195,7 +198,7 @@ export async function buildApplicationDetail(user, app, instance) {
   }
 
   // 附件列表（含票据）
-  const [atts] = await query(
+  const atts = await query(
     'SELECT id, biz_type, original_name, mime, size_bytes, uploaded_at FROM attachments WHERE application_id = ? ORDER BY id',
     [app.id]
   );
@@ -203,19 +206,19 @@ export async function buildApplicationDetail(user, app, instance) {
 
   // 复制重提来源
   if (app.source_application_id) {
-    const [src] = await query('SELECT app_no FROM applications WHERE id = ?', [app.source_application_id]);
+    const src = await query('SELECT app_no FROM applications WHERE id = ?', [app.source_application_id]);
     detail.sourceApplicationNo = src[0] ? src[0].app_no : null;
   }
 
   // 自定义模板 schema（前端动态渲染）
   if (app.type === 'CUSTOM') {
-    const [tpl] = await query(
+    const tpl = await query(
       'SELECT name, form_schema, flow_config, version FROM process_templates WHERE id = ? AND version = ?',
       [app.template_id, app.template_version]
     );
     if (!tpl.length) {
       // 版本行可能已被清理的兜底：取同 id 任意版本
-      const [anyTpl] = await query('SELECT name, form_schema, version FROM process_templates WHERE id = ? LIMIT 1', [app.template_id]);
+      const anyTpl = await query('SELECT name, form_schema, version FROM process_templates WHERE id = ? LIMIT 1', [app.template_id]);
       detail.template = anyTpl[0] || null;
     } else {
       detail.template = tpl[0];
@@ -227,7 +230,7 @@ export async function buildApplicationDetail(user, app, instance) {
 /** 跨申请重复票据预警（详情页/财务审核实时计算） */
 export async function computeDuplicateWarnings(app) {
   if (app.type !== 'REIMBURSEMENT') return [];
-  const [rows] = await query(
+  const rows = await query(
     `SELECT a.app_no, a.title, u.name AS applicant_name, r.receipt_no, att.original_name
      FROM receipts r
      JOIN expense_items e ON e.id = r.expense_item_id
@@ -251,7 +254,7 @@ export async function computeDuplicateWarnings(app) {
 
 /** 辅助：详情入口（路由使用） */
 export async function getApplicationForDetail(user, id) {
-  const [rows] = await query(
+  const rows = await query(
     `SELECT a.*, u.name AS applicant_name,
             d.name AS dept_name
      FROM applications a
@@ -265,7 +268,7 @@ export async function getApplicationForDetail(user, id) {
   app.form_data = parseJson(app.form_data, {});
   let instance = null;
   if (app.current_instance_id) {
-    const [inst] = await query('SELECT * FROM process_instances WHERE id = ?', [app.current_instance_id]);
+    const inst = await query('SELECT * FROM process_instances WHERE id = ?', [app.current_instance_id]);
     instance = inst[0] || null;
     if (instance && instance.flow_snapshot) {
       instance.flow_snapshot = typeof instance.flow_snapshot === 'string'

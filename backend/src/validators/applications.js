@@ -146,9 +146,9 @@ export const reimbursementSchema = z
         if (!item.noReceiptReason.trim()) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['expenseItems', i, 'noReceiptReason'], message: '无票支出必须填写原因' });
         }
-      } else if (item.attachmentIds.length === 0) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['expenseItems', i, 'attachmentIds'], message: '每条明细默认至少关联 1 份票据' });
       }
+      // 注意：『每条明细至少关联 1 份票据』的完整性校验移到提交时执行（草稿阶段允许暂缺票据，
+      // 便于先建草稿再逐条上传票据），见 approvalService.submitApplication。
       // 同一张报销单内不能重复使用同一票据记录
       for (const attId of item.attachmentIds) {
         if (seenAttachments.has(attId)) {
