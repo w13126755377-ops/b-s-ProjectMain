@@ -1,0 +1,65 @@
+# 企业审批系统一键部署：MySQL 8.0 + Node 后端 + nginx 前端
+# 启动：docker compose up -d --build
+# 访问：http://localhost:8080（WEB_PORT 可改，见 .env.example）
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: approval-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: approval_db
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      # 首次启动自动执行建库建表与演示数据（01_schema.sql / 02_seed.sql）
+      - ./backend/sql/init:/docker-entrypoint-initdb.d:ro
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    ports:
+      - "3306:3306"
+
+  backend:
+    build: ./backend
+    container_name: approval-backend
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      DB_NAME: approval_db
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      JWT_EXPIRES: 7d
+      UPLOAD_DIR: /app/uploads
+      TZ: Asia/Shanghai
+      # Web Push（可选增强）：未配置时自动禁用，系统其余功能不受影响
+      PUSH_ENABLED: "false"
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build: ./frontend
+    container_name: approval-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  mysql_data:
+  uploads:
