@@ -127,10 +127,10 @@ export async function deptStats(user) {
     `SELECT b.ym, COALESCE(t.approved_cents, 0) AS approved_cents, COALESCE(t.c, 0) AS c
      FROM ${MONTH_BUCKETS} b
      LEFT JOIN (
-       SELECT DATE_FORMAT(submitted_at, '%Y-%m') AS ym,
-              SUM(total_amount_cents) AS approved_cents, COUNT(*) AS c
-       FROM applications
-       WHERE status = 'APPROVED' AND submitted_at IS NOT NULL ${w ? `AND ${w}` : ''}
+       SELECT DATE_FORMAT(a.submitted_at, '%Y-%m') AS ym,
+              SUM(a.total_amount_cents) AS approved_cents, COUNT(*) AS c
+       FROM applications a
+       WHERE a.status = 'APPROVED' AND a.submitted_at IS NOT NULL ${w ? `AND ${w}` : ''}
        GROUP BY ym
      ) t ON t.ym = b.ym
      ORDER BY b.ym`,
