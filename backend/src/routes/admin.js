@@ -12,6 +12,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { validateForPublish, checkSpecifiedUsers } from '../services/templateService.js';
 import { deptStats } from '../services/statsService.js';
+import { parseJson } from '../utils/helpers.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
@@ -179,7 +180,7 @@ adminRouter.get('/templates', asyncHandler(async (_req, res) => {
   ok(res, rows.map((t) => ({
     id: t.id, code: t.code, name: t.name, description: t.description, category: t.category,
     version: t.version, status: t.status,
-    applicableDepts: JSON.parse(t.applicable_depts || '[]'),
+    applicableDepts: parseJson(t.applicable_depts, []),
     formSchema: t.form_schema, flowConfig: t.flow_config,
     createdBy: t.created_by, createdAt: t.created_at, updatedAt: t.updated_at,
   })));
@@ -235,7 +236,7 @@ adminRouter.post('/templates/:id/publish', validate({ params: z.object({ id: z.c
     ...(await checkSpecifiedUsers({ flow_config: tpl.flow_config })),
   ];
   // 适用部门合法性
-  const deptIds = JSON.parse(tpl.applicable_depts || '[]');
+  const deptIds = parseJson(tpl.applicable_depts, []);
   if (deptIds.length) {
     const [depts] = await query(`SELECT id FROM departments WHERE id IN (${deptIds.map(() => '?').join(',')})`, deptIds);
     if (depts.length !== deptIds.length) errors.push('适用部门包含不存在的部门');

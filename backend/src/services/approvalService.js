@@ -13,7 +13,7 @@
  * 5. 重复点击/网络重试/两个浏览器同时审批不能产生两次有效流转
  */
 import { badRequest, conflict, forbidden, notFound } from '../errors.js';
-import { travelDays } from '../utils/helpers.js';
+import { travelDays, parseJson } from '../utils/helpers.js';
 import {
   procurementSchema, travelSchema, reimbursementSchema,
 } from '../validators/applications.js';
@@ -136,12 +136,14 @@ async function getThresholdForConn(conn) {
 async function buildFlow(conn, app, totalCents) {
   let nodes;
   let thresholdCents = null;
+  let templateVersion = null;
   if (app.type === 'CUSTOM') {
     const [rows] = await conn.execute(
       'SELECT flow_config, version FROM process_templates WHERE id = ?', [app.template_id]
     );
     if (!rows.length) throw badRequest('流程模板不存在');
     const tpl = rows[0];
+    templateVersion = tpl.version;
     nodes = JSON.parse(JSON.stringify((tpl.flow_config || {}).nodes || []));
     if (nodes.length < 2) throw badRequest('流程模板节点不完整（至少 2 个节点），请联系管理员');
   } else {
@@ -186,7 +188,7 @@ async function buildFlow(conn, app, totalCents) {
       merged.push({ ...n, rules: undefined });
     }
   }
-  return { nodes: merged, thresholdCents };
+  return { nodes: merged, thresholdCents, templateVersion };
 }
 
 /* ============================ 校验与归一化 ============================ */
@@ -195,7 +197,7 @@ async function buildFlow(conn, app, totalCents) {
  * 从数据库重建完整提交载荷（form_data + 明细表），保证"提交时服务端重新校验"。
  */
 export async function loadPayloadFromDb(conn, app) {
-  const form = JSON.parse(app.form_data || '{}');
+  const form = parseJson(app.form_data, {});
   if (app.type === 'PROCUREMENT') {
     const [items] = await conn.execute(
       `SELECT name, spec, quantity, unit, unit_price_cents AS unitPriceCents
@@ -210,7 +212,7 @@ export async function loadPayloadFromDb(conn, app) {
       items,
       quotations: quotes.map((q) => ({
         ...q, online: !!q.online, selected: !!q.selected,
-        attachmentIds: JSON.parse(q.attachment_ids || '[]'),
+        attachmentIds: parseJson(q.attachment_ids, []),
       })),
     };
   }
@@ -429,18 +431,24 @@ async function saveDetails(conn, applicationId, data) {
   }
 }
 
-/** 报销票据附件必须是 RECEIPT 类型（通过票据上传入口上传） */
+/** 报销票据附件必须是 RECEIPT 类型（通过票据上传入口上传），且同单内不得复用同一文件（MD5） */
 export async function ensureReceiptAttachments(conn, applicationId, receipts) {
   const ids = receipts.map((r) => r.attachmentId);
   if (!ids.length) return;
   const [rows] = await conn.execute(
-    `SELECT id, biz_type FROM attachments WHERE application_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
+    `SELECT id, biz_type, md5 FROM attachments WHERE application_id = ? AND id IN (${ids.map(() => '?').join(',')})`,
     [applicationId, ...ids]
   );
-  const map = new Map(rows.map((r) => [r.id, r.biz_type]));
+  const map = new Map(rows.map((r) => [r.id, r]));
+  const md5Seen = new Map(); // md5 -> 首次使用的附件 id
   for (const r of receipts) {
-    if (!map.has(r.attachmentId)) throw badRequest(`票据附件不存在（id=${r.attachmentId}）`);
-    if (map.get(r.attachmentId) !== 'RECEIPT') throw badRequest('票据文件必须通过票据上传入口上传');
+    const att = map.get(r.attachmentId);
+    if (!att) throw badRequest(`票据附件不存在（id=${r.attachmentId}）`);
+    if (att.biz_type !== 'RECEIPT') throw badRequest('票据文件必须通过票据上传入口上传');
+    if (md5Seen.has(att.md5) && md5Seen.get(att.md5) !== att.id) {
+      throw badRequest('同一张票据（文件内容相同）不能在同一报销单内重复使用');
+    }
+    md5Seen.set(att.md5, att.id);
   }
 }
 
@@ -526,14 +534,14 @@ export async function submitApplication(conn, user, applicationId) {
   }
 
   // 构建并快照审批路径（人员解析 + 委托 + 阈值 + 模板版本）
-  const { nodes, thresholdCents } = await buildFlow(conn, app, data.totalCents);
+  const { nodes, thresholdCents, templateVersion } = await buildFlow(conn, app, data.totalCents);
 
   const [upd] = await conn.execute(
     `UPDATE applications
      SET status = 'IN_APPROVAL', form_data = ?, total_amount_cents = ?,
          linked_application_id = ?, template_version = ?, submitted_at = NOW(), finished_at = NULL
      WHERE id = ? AND status = 'DRAFT'`,
-    [JSON.stringify(data.formData), data.totalCents, data.linkedApplicationId, app.template_version, applicationId]
+    [JSON.stringify(data.formData), data.totalCents, data.linkedApplicationId, templateVersion, applicationId]
   );
   if (upd.affectedRows === 0) throw conflict('该申请已提交（请勿重复操作）');
 
@@ -544,7 +552,7 @@ export async function submitApplication(conn, user, applicationId) {
        (application_id, template_id, template_version, flow_snapshot, current_node_idx,
         current_approver_id, status, total_amount_cents, submitted_at)
      VALUES (?, ?, ?, ?, 0, ?, 'IN_APPROVAL', ?, NOW())`,
-    [applicationId, app.template_id, app.template_version,
+    [applicationId, app.template_id, templateVersion,
      JSON.stringify({ nodes, thresholdCents, builtin: app.type !== 'CUSTOM' }),
      nodes[0].resolved_user_id, data.totalCents]
   );
@@ -565,7 +573,7 @@ export async function submitApplication(conn, user, applicationId) {
     type: NOTIFY_TYPE.TODO,
     title: `新的审批待办：${app.title}`,
     content: `申请人 ${user.name} 提交了申请，请及时审批`,
-    link: `/applications/${applicationId}`,
+    link: `/apps/${applicationId}`,
     bizKey: `TODO:inst:${instanceId}:node:0:user:${first.resolved_user_id}`,
   }, conn);
   if (inserted) {
@@ -573,7 +581,7 @@ export async function submitApplication(conn, user, applicationId) {
       userId: first.resolved_user_id, type: NOTIFY_TYPE.TODO,
       title: `新的审批待办：${app.title}`,
       content: `申请人 ${user.name} 提交了申请，请及时审批`,
-      link: `/applications/${applicationId}`,
+      link: `/apps/${applicationId}`,
     });
   }
   return {
@@ -655,13 +663,13 @@ async function handleTaskAction(conn, user, instanceId, action, comment) {
         userId: app.applicant_id, type: NOTIFY_TYPE.APPROVED,
         title: `申请已通过：${app.title}`,
         content: '恭喜，您的申请已全部审批通过',
-        link: `/applications/${appId}`,
+        link: `/apps/${appId}`,
         bizKey: `APPROVED:app:${appId}:user:${app.applicant_id}`,
       }, conn);
       if (ins) notifies.push({
         userId: app.applicant_id, type: NOTIFY_TYPE.APPROVED,
         title: `申请已通过：${app.title}`, content: '恭喜，您的申请已全部审批通过',
-        link: `/applications/${appId}`,
+        link: `/apps/${appId}`,
       });
     } else {
       const next = nodes[nextIdx];
@@ -669,14 +677,14 @@ async function handleTaskAction(conn, user, instanceId, action, comment) {
         userId: next.resolved_user_id, type: NOTIFY_TYPE.TODO,
         title: `新的审批待办：${app.title}`,
         content: `${user.name} 已通过上一节点审批，请及时处理`,
-        link: `/applications/${appId}`,
+        link: `/apps/${appId}`,
         bizKey: `TODO:inst:${instanceId}:node:${nextIdx}:user:${next.resolved_user_id}`,
       }, conn);
       if (ins) notifies.push({
         userId: next.resolved_user_id, type: NOTIFY_TYPE.TODO,
         title: `新的审批待办：${app.title}`,
         content: `${user.name} 已通过上一节点审批，请及时处理`,
-        link: `/applications/${appId}`,
+        link: `/apps/${appId}`,
       });
       refreshUsers.push(next.resolved_user_id);
     }
@@ -701,13 +709,13 @@ async function handleTaskAction(conn, user, instanceId, action, comment) {
       userId: app.applicant_id, type: NOTIFY_TYPE.REJECTED,
       title: `申请被驳回：${app.title}`,
       content: `驳回理由：${comment}`,
-      link: `/applications/${appId}`,
+      link: `/apps/${appId}`,
       bizKey: `REJECTED:app:${appId}:user:${app.applicant_id}`,
     }, conn);
     if (ins) notifies.push({
       userId: app.applicant_id, type: NOTIFY_TYPE.REJECTED,
       title: `申请被驳回：${app.title}`, content: `驳回理由：${comment}`,
-      link: `/applications/${appId}`,
+      link: `/apps/${appId}`,
     });
   }
   return { instanceId, applicationId: appId, notifies, refreshUsers, appNo: app.app_no, title: app.title };
@@ -756,13 +764,13 @@ export async function withdrawApplication(conn, user, applicationId) {
       userId: cur.resolved_user_id, type: NOTIFY_TYPE.WITHDRAWN,
       title: `申请被撤回：${app.title}`,
       content: `申请人 ${user.name} 撤回了该申请，原待办已失效`,
-      link: `/applications/${applicationId}`,
+      link: `/apps/${applicationId}`,
       bizKey: `WITHDRAWN:app:${applicationId}:user:${cur.resolved_user_id}`,
     }, conn);
     if (ins) notifies.push({
       userId: cur.resolved_user_id, type: NOTIFY_TYPE.WITHDRAWN,
       title: `申请被撤回：${app.title}`, content: `申请人 ${user.name} 撤回了该申请，原待办已失效`,
-      link: `/applications/${applicationId}`,
+      link: `/apps/${applicationId}`,
     });
   }
   return { applicationId, notifies, refreshUsers: [user.id, ...(cur ? [cur.resolved_user_id] : [])] };
@@ -791,7 +799,7 @@ export async function remindApplication(conn, user, applicationId) {
     userId: cur.resolved_user_id, type: NOTIFY_TYPE.REMIND,
     title: `催办提醒：${app.title}`,
     content: `申请人 ${user.name} 提醒您尽快处理该申请`,
-    link: `/applications/${applicationId}`,
+    link: `/apps/${applicationId}`,
     bizKey: `REMIND:inst:${inst.id}:node:${inst.current_node_idx}:user:${cur.resolved_user_id}`,
   }, conn);
   if (!inserted) throw conflict('该节点已催办过，请耐心等待审批人处理');
@@ -801,7 +809,7 @@ export async function remindApplication(conn, user, applicationId) {
       userId: cur.resolved_user_id, type: NOTIFY_TYPE.REMIND,
       title: `催办提醒：${app.title}`,
       content: `申请人 ${user.name} 提醒您尽快处理该申请`,
-      link: `/applications/${applicationId}`,
+      link: `/apps/${applicationId}`,
     }],
     refreshUsers: [cur.resolved_user_id],
   };
@@ -819,7 +827,7 @@ export async function copyApplication(conn, user, applicationId) {
   }
   const newId = await createApplicationRow(conn, user, app.type, app.template_id, {
     title: `${app.title}（重新提交）`,
-    formData: JSON.parse(app.form_data || '{}'),
+    formData: parseJson(app.form_data, {}),
     linkedApplicationId: app.linked_application_id || null,
   }, applicationId);
 

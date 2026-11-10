@@ -5,6 +5,7 @@
  */
 import { forbidden, notFound } from '../errors.js';
 import { query } from '../db.js';
+import { parseJson } from '../utils/helpers.js';
 
 /** 我的申请列表（筛选 + 分页） */
 export async function listMyApplications(user, f) {
@@ -168,7 +169,7 @@ export async function buildApplicationDetail(user, app, instance) {
     const [items] = await query('SELECT * FROM procurement_items WHERE application_id = ? ORDER BY id', [app.id]);
     detail.items = items;
     const [quotes] = await query('SELECT * FROM quotations WHERE application_id = ? ORDER BY id', [app.id]);
-    detail.quotations = quotes.map((q) => ({ ...q, attachmentIds: JSON.parse(q.attachment_ids || '[]') }));
+    detail.quotations = quotes.map((q) => ({ ...q, attachmentIds: parseJson(q.attachment_ids, []) }));
   } else if (app.type === 'REIMBURSEMENT') {
     const [items] = await query('SELECT * FROM expense_items WHERE application_id = ? ORDER BY id', [app.id]);
     const [recs] = await query('SELECT * FROM receipts WHERE application_id = ?', [app.id]);
@@ -242,7 +243,10 @@ export async function computeDuplicateWarnings(app) {
      LIMIT 20`,
     [app.id, app.id, app.id]
   );
-  return rows;
+  return rows.map((x) => ({
+    appNo: x.app_no, title: x.title, applicantName: x.applicant_name,
+    receiptNo: x.receipt_no, fileName: x.original_name,
+  }));
 }
 
 /** 辅助：详情入口（路由使用） */
@@ -258,7 +262,7 @@ export async function getApplicationForDetail(user, id) {
   );
   if (!rows.length) throw notFound('申请不存在');
   const app = rows[0];
-  app.form_data = app.form_data ? JSON.parse(app.form_data) : {};
+  app.form_data = parseJson(app.form_data, {});
   let instance = null;
   if (app.current_instance_id) {
     const [inst] = await query('SELECT * FROM process_instances WHERE id = ?', [app.current_instance_id]);

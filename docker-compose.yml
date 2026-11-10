@@ -37,7 +37,7 @@ services:
       DB_USER: root
       DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
       DB_NAME: approval_db
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:?请先在 .env 中设置 JWT_SECRET（运行 openssl rand -hex 32 生成随机密钥）}
       JWT_EXPIRES: 7d
       UPLOAD_DIR: /app/uploads
       TZ: Asia/Shanghai

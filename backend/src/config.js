@@ -3,6 +3,7 @@
  * 生产/Docker 环境通过 docker-compose.yml / .env 注入。
  */
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,7 +19,11 @@ export const config = {
     connectionLimit: 10,
   },
   jwt: {
-    secret: process.env.JWT_SECRET || 'dev-secret-change-me-in-production',
+    secret: process.env.JWT_SECRET || (() => {
+      // 本地开发兜底：生成随机密钥（重启后登录态失效）；生产/Docker 务必显式配置 JWT_SECRET
+      console.warn('[config] 未设置 JWT_SECRET，已生成随机密钥（重启后需重新登录）；生产环境请通过 .env 显式配置');
+      return crypto.randomBytes(32).toString('hex');
+    })(),
     expiresIn: process.env.JWT_EXPIRES || '7d',
   },
   upload: {

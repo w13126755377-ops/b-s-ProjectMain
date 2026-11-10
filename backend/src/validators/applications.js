@@ -8,7 +8,15 @@ import { z } from 'zod';
 const id = z.number().int().positive();
 const title = z.string().trim().min(1, '标题不能为空').max(100, '标题最长 100 字');
 const remark = z.string().trim().max(500, '备注最长 500 字').optional().default('');
-const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD');
+const dateStr = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD')
+  .refine((s) => {
+    // 校验日历合法性（如 2026-02-31 无效）
+    const [y, m, d] = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }, '日期不是有效日期');
 const dateTimeStr = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/, '时间格式应为 YYYY-MM-DD HH:mm')
@@ -21,7 +29,7 @@ const procurementItem = z.object({
   spec: z.string().trim().max(100).optional().default(''),
   quantity: z.number().positive('数量必须大于 0').max(1e6),
   unit: z.string().trim().min(1, '单位不能为空').max(20),
-  unitPriceCents: cents.nonnegative('预计单价不能为负数').max(1e12),
+  unitPriceCents: cents.positive('预计单价必须大于 0').max(1e12),
   // amountCents 由服务端重算，忽略客户端值
 });
 
@@ -102,8 +110,8 @@ export const travelSchema = z
     attachmentIds: z.array(id).max(20).optional().default([]),
   })
   .superRefine((form, ctx) => {
-    if (new Date(form.endTime).getTime() < new Date(form.startTime).getTime()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['endTime'], message: '结束时间不得早于开始时间' });
+    if (new Date(form.endTime).getTime() <= new Date(form.startTime).getTime()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['endTime'], message: '结束时间必须晚于开始时间' });
     }
   });
 

@@ -426,7 +426,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -465,18 +465,23 @@ const appId = computed(() => Number(route.params.id));
 const form = computed(() => app.value?.form_data || {});
 
 /* ---------- 数据加载：SSE refreshTick 变化时自动刷新（作业要求） ---------- */
+let loadSeq = 0; // 请求序号：详情页间跳转 / SSE 并发刷新时丢弃过期响应
 async function load() {
+  const seq = ++loadSeq;
   loading.value = true;
   try {
-    app.value = await getApplication(appId.value);
+    const data = await getApplication(appId.value);
+    if (seq !== loadSeq) return; // 已切换到其他申请，丢弃过期响应
+    app.value = data;
     error.value = false;
   } catch (e) {
+    if (seq !== loadSeq) return;
     app.value = null;
     error.value = true;
     errorCode.value = e.code || 0;
     errMsg.value = e.message;
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
 }
 
@@ -627,9 +632,16 @@ async function copyAppNo() {
   }
 }
 
+/** HTML 转义（重复票据预警弹窗用，防止用户可控字段注入） */
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 /** 跨单重复票据预警弹窗（提交响应 warnings，警告不阻断） */
 function showWarnings(warnings) {
-  const lines = (warnings || []).map((w) => dupText(w));
+  const lines = (warnings || []).map((w) => escHtml(dupText(w)));
   ElMessageBox.alert(lines.join('<br/>'), '重复票据预警', {
     type: 'warning',
     dangerouslyUseHTMLString: true,
@@ -760,6 +772,8 @@ function openApprove() {
 function openReject() {
   rejectForm.reason = '';
   rejectVisible.value = true;
+  // 清除上次打开残留的校验错误提示（如上次驳回理由为空点确认后）
+  nextTick(() => rejectFormRef.value?.clearValidate());
 }
 
 async function doApprove() {

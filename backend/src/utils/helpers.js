@@ -6,6 +6,18 @@ export function md5Buffer(buf) {
   return crypto.createHash('md5').update(buf).digest('hex');
 }
 
+/**
+ * 安全解析 JSON 列：mysql2 默认已把 JSON 列解析为对象/数组，
+ * 这里兼容"已是对象/数组"与"字符串"两种形态，空值/非法返回 fallback。
+ */
+export function parseJson(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'string') {
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+  return value;
+}
+
 /** 金额（分）→ 元字符串，展示用，如 123456 -> "1234.56" */
 export function centsToYuan(cents) {
   const n = Number(cents ?? 0);

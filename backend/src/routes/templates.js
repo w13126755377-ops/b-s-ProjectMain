@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { ok, asyncHandler } from '../errors.js';
 import { requireAuth } from '../middleware/auth.js';
+import { parseJson } from '../utils/helpers.js';
 
 export const templatesRouter = Router();
 templatesRouter.use(requireAuth);
@@ -25,7 +26,7 @@ templatesRouter.get('/published', asyncHandler(async (req, res) => {
   );
   // 适用部门过滤：applicable_depts 为空数组 = 全部部门；否则须包含本人部门
   const applicable = custom.filter((t) => {
-    const depts = JSON.parse(t.applicable_depts || '[]');
+    const depts = parseJson(t.applicable_depts, []);
     return depts.length === 0 || depts.includes(req.user.dept_id);
   });
   ok(res, {
@@ -33,7 +34,7 @@ templatesRouter.get('/published', asyncHandler(async (req, res) => {
     custom: applicable.map((t) => ({
       id: t.id, code: t.code, name: t.name, description: t.description, version: t.version,
       formSchema: t.form_schema, flowConfig: t.flow_config,
-      applicableDepts: JSON.parse(t.applicable_depts || '[]'),
+      applicableDepts: parseJson(t.applicable_depts, []),
     })),
   });
 }));

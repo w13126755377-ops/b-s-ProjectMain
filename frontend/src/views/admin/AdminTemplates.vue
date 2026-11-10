@@ -626,6 +626,16 @@ function openEdit(row) {
   form.description = row.description || '';
   form.applicableDepts = [...(row.applicableDepts || [])];
   editingFields.value = ((parseJson(row.formSchema) || {}).fields || []).map(fieldToEdit);
+  // 条件引用金额字段时：存储值为分，界面以元展示（与 min/max 口径一致）
+  for (const f of editingFields.value) {
+    if (f.conditionField && f.conditionOp !== 'in' && f.conditionValue !== '') {
+      const ref = editingFields.value.find((x) => x.id === f.conditionField);
+      const n = Number(f.conditionValue);
+      if (ref && ref.type === 'amount' && Number.isFinite(n)) {
+        f.conditionValue = centsToYuan(n);
+      }
+    }
+  }
   editingNodes.value = ((parseJson(row.flowConfig) || {}).nodes || []).map(nodeToEdit);
   publishError.value = '';
   drawerVisible.value = true;
@@ -747,11 +757,16 @@ function buildPayload() {
     }
     if (f.conditionField) {
       const raw = String(f.conditionValue ?? '');
-      item.condition = {
-        field: f.conditionField,
-        op: f.conditionOp,
-        value: f.conditionOp === 'in' ? raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : raw,
-      };
+      let condValue;
+      if (f.conditionOp === 'in') {
+        condValue = raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+      } else {
+        // 条件引用金额字段：界面以元输入，存储/比较口径为分（元→分）
+        const ref = editingFields.value.find((x) => x.id === f.conditionField);
+        const cents = ref && ref.type === 'amount' ? yuanToCents(raw) : null;
+        condValue = cents !== null ? cents : raw;
+      }
+      item.condition = { field: f.conditionField, op: f.conditionOp, value: condValue };
     }
     return item;
   });

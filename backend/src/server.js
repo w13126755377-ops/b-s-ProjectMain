@@ -85,8 +85,8 @@ async function runTimeoutRemind() {
     const timeoutHours = Number(await getSystemConfig('remind_timeout_hours')) || 48;
     if (timeoutHours <= 0) return;
     const instances = await query(
-      `SELECT pi.id, pi.application_id, pi.current_approver_id, pi.current_node_index,
-              pi.approver_ids, a.app_no, a.type, a.title
+      `SELECT pi.id, pi.application_id, pi.current_approver_id,
+              a.app_no, a.type, a.title
        FROM process_instances pi
        JOIN applications a ON a.id = pi.application_id
        WHERE pi.status = 'IN_APPROVAL' AND pi.current_approver_id IS NOT NULL`
@@ -107,7 +107,7 @@ async function runTimeoutRemind() {
         type: NOTIFY_TYPE.REMIND,
         title: '审批超时提醒',
         content: `您有申请「${inst.app_no} ${inst.title}」已超过 ${timeoutHours < 1 ? Math.round(timeoutHours * 60) + ' 分钟' : timeoutHours + ' 小时'}未处理，请及时审批`,
-        link: `/tasks?instanceId=${inst.id}`,
+        link: `/apps/${inst.application_id}`,
         bizKey,
       });
       if (inserted) {

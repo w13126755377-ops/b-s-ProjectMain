@@ -34,6 +34,7 @@ export const useNotifyStore = defineStore('notify', {
       this.connected = false;
     },
     async _poll() {
+      if (!localStorage.getItem('token')) return; // 未登录/已退出不再轮询
       try {
         const { unread } = await getUnreadCount();
         if (this._lastPollUnread !== null && unread !== this._lastPollUnread) {
@@ -45,6 +46,7 @@ export const useNotifyStore = defineStore('notify', {
     },
     async _trySse() {
       if (this._es) return; // 已有连接
+      if (!localStorage.getItem('token')) return; // 已退出不再建立 SSE
       try {
         const { ticket } = await getStreamTicket();
         const es = new EventSource(`/api/notifications/stream?token=${encodeURIComponent(ticket)}`);

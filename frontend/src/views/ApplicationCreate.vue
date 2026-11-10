@@ -136,7 +136,7 @@
             <h3 class="card-title" style="margin: 0">采购明细（至少 2 条）</h3>
             <el-button type="primary" plain :icon="Plus" :disabled="formDisabled" @click="addItem">添加明细</el-button>
           </div>
-          <div v-for="(it, idx) in procurement.items" :key="idx" class="row-card">
+          <div v-for="(it, idx) in procurement.items" :key="it._uid" class="row-card">
             <div class="row-fields">
               <div class="field">
                 <span class="field-label">物品/服务名称 *</span>
@@ -174,7 +174,7 @@
             <h3 class="card-title" style="margin: 0">报价比较（至少 1 家，须且仅选 1 家拟选）</h3>
             <el-button type="primary" plain :icon="Plus" :disabled="formDisabled" @click="addQuotation">添加报价</el-button>
           </div>
-          <div v-for="(q, idx) in procurement.quotations" :key="idx" class="row-card">
+          <div v-for="(q, idx) in procurement.quotations" :key="q._uid" class="row-card">
             <div class="row-fields">
               <div class="field">
                 <span class="field-label">供应商名称 *</span>
@@ -397,7 +397,7 @@
             <h3 class="card-title" style="margin: 0">费用明细（至少 3 条）</h3>
             <el-button type="primary" plain :icon="Plus" :disabled="formDisabled" @click="addExpenseItem">添加明细</el-button>
           </div>
-          <div v-for="(it, idx) in reimbursement.expenseItems" :key="idx" class="row-card">
+          <div v-for="(it, idx) in reimbursement.expenseItems" :key="it._uid" class="row-card">
             <div class="row-fields">
               <div class="field field-sm">
                 <span class="field-label">费用类型 *</span>
@@ -605,14 +605,18 @@ const reimbursement = reactive({});
 const customForm = reactive({});
 const selectedQuoteIdx = ref(-1); // 拟选供应商下标（须且仅 1 家）
 
+// 明细行稳定 key：v-for 用 _uid 而非数组下标，避免删除行后复用组件状态（如 FileUpload）
+let uidSeed = 0;
+const nextUid = () => `r${++uidSeed}`;
+
 function newItem() {
-  return { name: '', spec: '', quantity: 1, unit: '', unitPrice: '' };
+  return { _uid: nextUid(), name: '', spec: '', quantity: 1, unit: '', unitPrice: '' };
 }
 function newQuotation() {
-  return { supplierName: '', quoteDate: '', quoteAmount: '', quoteDetail: '', online: false, purchaseLink: '', attachmentIds: [], selected: false };
+  return { _uid: nextUid(), supplierName: '', quoteDate: '', quoteAmount: '', quoteDetail: '', online: false, purchaseLink: '', attachmentIds: [], selected: false };
 }
 function newExpenseItem() {
-  return { expenseType: '', occurDate: '', purpose: '', amount: '', receiptNo: '', noReceipt: false, noReceiptReason: '', attachmentIds: [] };
+  return { _uid: nextUid(), expenseType: '', occurDate: '', purpose: '', amount: '', receiptNo: '', noReceipt: false, noReceiptReason: '', attachmentIds: [] };
 }
 
 function resetProcurement() {
@@ -703,8 +707,8 @@ const travelRules = {
     { required: true, message: '结束时间不能为空', trigger: ['blur', 'change'] },
     {
       validator: (rule, value, cb) => {
-        if (value && travel.startTime && new Date(String(value).replace(' ', 'T')) < new Date(travel.startTime.replace(' ', 'T'))) {
-          return cb(new Error('结束时间不得早于开始时间'));
+        if (value && travel.startTime && new Date(String(value).replace(' ', 'T')) <= new Date(travel.startTime.replace(' ', 'T'))) {
+          return cb(new Error('结束时间必须晚于开始时间'));
         }
         cb();
       },
@@ -1169,10 +1173,12 @@ function backfill(d) {
     procurement.singleSourceReason = f.singleSourceReason || '';
     procurement.selectReason = f.selectReason || '';
     procurement.items = (d.items || []).map((it) => ({
+      _uid: nextUid(),
       name: it.name || '', spec: it.spec || '', quantity: it.quantity, unit: it.unit || '',
       unitPrice: it.unit_price_cents !== undefined && it.unit_price_cents !== null ? centsToYuan(it.unit_price_cents) : '',
     }));
     procurement.quotations = (d.quotations || []).map((q) => ({
+      _uid: nextUid(),
       supplierName: q.supplier_name || '',
       quoteDate: q.quote_date || '',
       quoteAmount: q.quote_amount_cents !== undefined && q.quote_amount_cents !== null ? centsToYuan(q.quote_amount_cents) : '',
@@ -1201,6 +1207,7 @@ function backfill(d) {
     reimbursement.remark = f.remark || '';
     reimbursement.linkedApplicationId = d.linked_application_id || null;
     reimbursement.expenseItems = (d.expenseItems || []).map((it) => ({
+      _uid: nextUid(),
       expenseType: it.expense_type || '',
       occurDate: it.occur_date || '',
       purpose: it.purpose || '',

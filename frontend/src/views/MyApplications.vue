@@ -246,10 +246,17 @@ function goCreate() {
 }
 
 /* ---------- 行操作 ---------- */
+/** HTML 转义（跨单重复票据预警弹窗用，防止用户可控字段注入） */
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 /** 跨单重复票据预警弹窗（警告不阻断，仅提示） */
 function showWarnings(warnings) {
   const lines = (warnings || []).map(
-    (w) => `「${w.title || w.appNo || '他单'}」存在重复票据：${w.receiptNo || w.fileName || '未知票据'}`
+    (w) => `「${escHtml(w.title || w.appNo || '他单')}」存在重复票据：${escHtml(w.receiptNo || w.fileName || '未知票据')}`
   );
   ElMessageBox.alert(lines.join('<br/>'), '重复票据预警', {
     type: 'warning',

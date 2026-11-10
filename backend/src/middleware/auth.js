@@ -21,7 +21,7 @@ export const ROLE = {
 /** 加载完整用户信息（含角色码列表、部门） */
 export async function loadUser(userId) {
   const user = await queryOne(
-    `SELECT u.id, u.username, u.email, u.name, u.dept_id, u.status, u.created_at,
+    `SELECT u.id, u.username, u.email, u.name, u.dept_id, u.status, u.dept_confirmed, u.created_at,
             d.name AS dept_name
      FROM users u
      LEFT JOIN departments d ON d.id = u.dept_id

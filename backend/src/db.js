@@ -16,6 +16,10 @@ export const pool = mysql.createPool({
   queueLimit: 0,
   timezone: '+08:00',
   charset: 'utf8mb4',
+  // DATE/DATETIME 返回字符串（避免时区与 Date 对象偏差），DECIMAL 返回数字（金额）
+  dateStrings: true,
+  decimalNumbers: true,
+  // 注意：不开 jsonStrings —— JSON 列仍由 mysql2 解析为对象/数组，统一用 helpers.parseJson 读取
 });
 
 /** 单条查询：返回行数组 */
